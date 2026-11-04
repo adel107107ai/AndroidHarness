@@ -1,0 +1,76 @@
+package com.androidharness.app.data
+
+import com.androidharness.app.data.db.DecisionDao
+import com.androidharness.app.data.db.DecisionEntity
+import java.util.UUID
+
+/** Valid sections, matching the memory sections. */
+object DecisionSections {
+    const val CHAT = "CHAT"
+    const val CODE = "CODE"
+    const val SHARED = "SHARED"
+    val ALL = setOf(CHAT, CODE, SHARED)
+}
+
+/**
+ * The decision ledger on top of [DecisionDao]. Rules, in order of strength:
+ *  1. Nothing is ever deleted and nothing is ever rewritten in place — a new
+ *     decision supersedes the old one, which keeps its rationale on disk.
+ *  2. A topic has at most one ACTIVE decision: [record] closes the previous
+ *     one in the same transaction that inserts its successor, and the chain
+ *     link (supersedesId) is derived automatically.
+ *  3. Closing without a replacement ([supersede]) keeps the row and records
+ *     the reason in closedReason.
+ */
+class DecisionLedger(private val dao: DecisionDao) {
+
+    suspend fun record(
+        projectId: String? = null,
+        section: String = DecisionSections.SHARED,
+        topicKey: String,
+        statement: String,
+        rationale: String = "",
+        evidenceRef: String? = null,
+    ): DecisionEntity {
+        require(statement.isNotBlank()) { "A decision needs a statement." }
+        val topic = topicKey.trim()
+        require(topic.isNotEmpty()) { "A decision needs a topic key." }
+        check(section in DecisionSections.ALL) { "Unknown section: $section" }
+        val now = System.currentTimeMillis()
+        val row = DecisionEntity(
+            id = UUID.randomUUID().toString(),
+            projectId = projectId,
+            section = section,
+            topicKey = topic,
+            statement = statement.trim(),
+            rationale = rationale.trim(),
+            status = "ACTIVE",
+            supersedesId = null, // set by the transaction below
+            evidenceRef = evidenceRef,
+            createdAt = now,
+            decidedAt = now,
+        )
+        // The topic's current ACTIVE decision (if any) is the one being replaced.
+        val prior = dao.activeDecision(topic)?.id
+        dao.recordAndSupersede(prior, row.copy(supersedesId = prior), now)
+        return row.copy(supersedesId = prior)
+    }
+
+    /** The one ACTIVE decision for a topic, or null when none stands. */
+    suspend fun active(topicKey: String): DecisionEntity? = dao.activeDecision(topicKey.trim())
+
+    /** Close a decision without a replacement (reverted / withdrawn). */
+    suspend fun supersede(id: String, reason: String): DecisionEntity {
+        require(reason.isNotBlank()) { "Closing a decision needs a reason." }
+        val row = requireNotNull(dao.decision(id)) { "Decision $id not found." }
+        check(row.status == "ACTIVE") {
+            "Decision ${row.id} is ${row.status}; only ACTIVE decisions can be closed."
+        }
+        val closed = row.copy(status = "SUPERSEDED", closedReason = reason.trim())
+        dao.updateDecision(closed)
+        return closed
+    }
+
+    /** The full chain for a topic, oldest first — never truncated, nothing deleted. */
+    suspend fun history(topicKey: String): List<DecisionEntity> = dao.history(topicKey.trim())
+}

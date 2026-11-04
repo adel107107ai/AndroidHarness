@@ -94,7 +94,8 @@ class FtpShareServerTest {
             val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
             while (files.root.toFile().listFiles()!!.any { it.name.startsWith(".harness-transfer-") } && System.nanoTime() < until) Thread.sleep(20)
             assertEquals("original", files.read("keep").bufferedReader().use { it.readText() })
-            assertEquals(listOf("keep"), files.root.toFile().listFiles()!!.map { it.name })
+            val names = files.root.toFile().listFiles()!!.map { it.name }
+            assertEquals("leftover entries: $names", listOf("keep"), names)
             assertEquals(-1, control.getInputStream().read())
         }
     }

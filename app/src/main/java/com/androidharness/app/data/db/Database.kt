@@ -13,6 +13,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "sessions")
@@ -685,6 +687,78 @@ interface HarnessDao {
     suspend fun deleteSessionFileChanges(sessionId: String)
 }
 
+/**
+ * The decision ledger: one immutable row per decision. A new decision never
+ * overwrites or deletes an earlier one — it supersedes it, keeping the old
+ * rationale on disk. Status moves only ACTIVE → SUPERSEDED, so reviewing
+ * past decisions and replaying the chain (supersedesId links) is always
+ * possible. This is the persistence half of “review previous decisions,
+ * then decide”.
+ */
+@kotlinx.serialization.Serializable
+@Entity(
+    tableName = "decisions",
+    indices = [Index("topicKey"), Index("status")],
+)
+data class DecisionEntity(
+    @PrimaryKey val id: String,
+    /** null = global (across projects). */
+    val projectId: String? = null,
+    /** CHAT / CODE / SHARED. */
+    val section: String = "SHARED",
+    /** Groups decisions about the same subject; the review key. */
+    val topicKey: String,
+    val statement: String,
+    /** Why this was decided — the part that was previously lost on overwrite. */
+    val rationale: String = "",
+    /** ACTIVE / SUPERSEDED. */
+    val status: String = "ACTIVE",
+    /** The decision this one replaced; the links rebuild the whole chain. */
+    val supersedesId: String? = null,
+    /** Optional link to run evidence (RunCompletionStore / verification). */
+    val evidenceRef: String? = null,
+    /** Set when a decision is closed without a replacement (reverted, withdrawn). */
+    val closedReason: String? = null,
+    val createdAt: Long,
+    val decidedAt: Long,
+)
+
+@Dao
+interface DecisionDao {
+    @Insert
+    suspend fun insertDecision(row: DecisionEntity)
+
+    @Update
+    suspend fun updateDecision(row: DecisionEntity)
+
+    @Query("SELECT * FROM decisions WHERE id = :id")
+    suspend fun decision(id: String): DecisionEntity?
+
+    @Query("SELECT * FROM decisions WHERE topicKey = :topicKey AND status = 'ACTIVE' ORDER BY decidedAt DESC LIMIT 1")
+    suspend fun activeDecision(topicKey: String): DecisionEntity?
+
+    @Query("SELECT * FROM decisions WHERE topicKey = :topicKey ORDER BY decidedAt ASC, createdAt ASC")
+    suspend fun history(topicKey: String): List<DecisionEntity>
+
+    /**
+     * One transaction: close the previous ACTIVE decision (if any) and insert
+     * its successor. Keeps the one-active-per-topic invariant even when two
+     * records race.
+     */
+    @Transaction
+    suspend fun recordAndSupersede(oldId: String?, row: DecisionEntity, now: Long) {
+        if (oldId != null) {
+            val old = decision(oldId)
+                ?: throw IllegalStateException("Decision $oldId not found; cannot supersede.")
+            check(old.status == "ACTIVE") {
+                "Decision ${old.id} is ${old.status}; only ACTIVE decisions can be superseded."
+            }
+            updateDecision(old.copy(status = "SUPERSEDED", closedReason = "superseded", decidedAt = now))
+        }
+        insertDecision(row)
+    }
+}
+
 @Database(
     entities = [
         SessionEntity::class,
@@ -699,14 +773,33 @@ interface HarnessDao {
         MessageFtsEntity::class,
         MemoryEntity::class,
         ChatAnswerVersionEntity::class,
+        DecisionEntity::class,
     ],
-    version = 23,
-    exportSchema = false,
+    version = 24,
+    // Schemas export to app/schemas so migration diffs are reviewable in git
+    // and future migration tests can load past versions.
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): HarnessDao
+    abstract fun decisionDao(): DecisionDao
 
     companion object {
+        val MIGRATION_23_24 = object : androidx.room.migration.Migration(23, 24) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `decisions` (" +
+                        "`id` TEXT NOT NULL PRIMARY KEY, " +
+                        "`projectId` TEXT, `section` TEXT NOT NULL, `topicKey` TEXT NOT NULL, " +
+                        "`statement` TEXT NOT NULL, `rationale` TEXT NOT NULL, `status` TEXT NOT NULL, " +
+                        "`supersedesId` TEXT, `evidenceRef` TEXT, `closedReason` TEXT, " +
+                        "`createdAt` INTEGER NOT NULL, `decidedAt` INTEGER NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_decisions_topicKey` ON `decisions` (`topicKey`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_decisions_status` ON `decisions` (`status`)")
+            }
+        }
+
         val MIGRATION_22_23 = object : androidx.room.migration.Migration(22, 23) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE memories ADD COLUMN section TEXT NOT NULL DEFAULT 'SHARED'")

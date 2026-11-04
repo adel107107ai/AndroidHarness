@@ -1057,6 +1057,14 @@ class AgentEngine(
             com.androidharness.app.tools.ShellPolicy.commandOf(call.argumentsJson)
         } else null
         val root = workspace.shellRoot
+        // The six hardline shell shapes apply in EVERY mode: full access skips
+        // the sandbox, never the never-allowed list. Runs before the mode check
+        // and before any saved grant is consulted.
+        if (command != null) {
+            com.androidharness.app.tools.ShellPolicy.hardlineDenyReason(command)?.let { reason ->
+                return ToolResult(false, reason)
+            }
+        }
         // Full access skips the shell denylist entirely, that is the point of the mode.
         if (mode != PermissionMode.FULL_ACCESS) {
             com.androidharness.app.tools.ShellPolicy.denyReason(command.orEmpty(), root, root)?.let { reason ->
@@ -1125,6 +1133,11 @@ class AgentEngine(
         kotlin.coroutines.coroutineContext[TaskBudget]?.check()
         val startedAt = System.currentTimeMillis()
         val linuxWasReady = linuxEnv.isReady
+        // Untrusted-content gate: a turn triggered by outside content (remote
+        // messages, automation) may only use the safe read-only list.
+        com.androidharness.app.tools.UntrustedGate.denyReason(call.name, toolContext.trust)?.let {
+            return ToolResult(false, it)
+        }
         var executed = try {
             if (call.name in setOf("git_push", "git_pull", "http_request", "shell", "shell_background") &&
                 workspace !is com.androidharness.app.workspace.SshFs) prepareGitHub()
@@ -1596,7 +1609,10 @@ class AgentEngine(
                 step(describeToolCall(call))
                 val tool = registry.get(call.name)
                 val subStartedAt = System.currentTimeMillis()
-                val result = if (tool == null || (!actionTools && !tool.isReadOnly) ||
+                val untrustedBlock = com.androidharness.app.tools.UntrustedGate.denyReason(call.name, ctx.trust)
+                val result = if (untrustedBlock != null) {
+                    ToolResult(false, untrustedBlock)
+                } else if (tool == null || (!actionTools && !tool.isReadOnly) ||
                     call.name == "ask_user" || call.name == "task" || call.name.startsWith("subagent_") || !WorkspaceToolRouting.available(tool, ctx)
                 ) {
                     ToolResult(false, "${call.name} is not available to subagents.")

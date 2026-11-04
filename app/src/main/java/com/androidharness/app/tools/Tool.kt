@@ -19,6 +19,8 @@ data class ToolContext(
     val sessionId: String? = null,
     /** Scoped to this call by the engine; never shared across chats or concurrent installs. */
     val onPackageProgress: suspend (com.androidharness.app.data.env.PackageInstallStatus) -> Unit = {},
+    /** Provenance of this turn's trigger; the default is the user's own request. */
+    val trust: TrustLevel = TrustLevel.LOCAL_USER,
 )
 
 data class ToolResult(

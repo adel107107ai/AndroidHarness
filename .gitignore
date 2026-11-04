@@ -13,6 +13,7 @@ key.properties
 *.apk
 *.aab
 *.ap_
+*.idsig
 captures/
 
 # --- IDE ---

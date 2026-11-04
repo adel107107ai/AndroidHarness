@@ -45,6 +45,9 @@ internal class FtpShareServer(
                 if (lan && !socket.inetAddress.isLoopbackAddress && !socket.inetAddress.isSiteLocalAddress) { socket.close(); continue }
                 if (!slots.tryAcquire()) { socket.close(); continue }
                 sockets += socket
+                // close() may have finished its broadcast before this socket
+                // joined the set; re-check so shutdown cannot miss it.
+                if (closed.get()) { sockets -= socket; slots.release(); runCatching { socket.close() }; continue }
                 pool.execute {
                     clientsChanged(count.incrementAndGet())
                     try { socket.use { Session(it).serve() } } catch (_: IOException) { }
@@ -56,6 +59,11 @@ internal class FtpShareServer(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         runCatching { listener?.close() }; sockets.forEach { runCatching { it.close() } }; pool.shutdownNow()
+        // A barrier, not a race: an aborted session must finish unwinding (and
+        // delete its staged .harness-transfer-* file) before callers observe
+        // the shared folder again. Without it a cancelled STOR leaves its temp
+        // file behind and every later listing shows it.
+        runCatching { pool.awaitTermination(5, TimeUnit.SECONDS) }
     }
     private inner class Session(private val socket: Socket) {
         private val input = socket.getInputStream().buffered()
@@ -179,6 +187,10 @@ internal class FtpShareServer(
             try {
                 server.accept().use { connection ->
                     sockets += connection
+                    // Register-then-recheck (same window as the control loop):
+                    // a socket accepted just after close()'s broadcast would
+                    // otherwise block forever in read() and strand its temp file.
+                    if (closed.get()) runCatching { connection.close() }
                     try {
                         require(connection.inetAddress == socket.inetAddress) { "Data connection must use the same peer." }
                         connection.soTimeout = 15_000
