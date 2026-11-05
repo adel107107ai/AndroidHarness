@@ -1,4 +1,6 @@
 name: Debug build
+# (This push re-registers the workflow: Actions was enabled after the file
+# last landed on the default branch, and registration happens on push.)
 
 # Builds the debug APK on every push to main (app/ changes), nightly at
 # 02:00 UTC, or on demand from the Actions tab. The APK is uploaded as a
