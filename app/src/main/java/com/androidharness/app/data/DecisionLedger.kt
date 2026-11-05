@@ -74,3 +74,27 @@ class DecisionLedger(private val dao: DecisionDao) {
     /** The full chain for a topic, oldest first — never truncated, nothing deleted. */
     suspend fun history(topicKey: String): List<DecisionEntity> = dao.history(topicKey.trim())
 }
+
+/**
+ * Keeps the ledger in step with the memories table: every save or edit of a
+ * DECISION memory appends an immutable chain entry (topic `mem:<id>`), and
+ * deletion or consolidation closes the active one with a reason. Memory rows
+ * hold the current truth; the ledger holds the history and the rationale.
+ */
+internal class DecisionSync(private val ledger: DecisionLedger) {
+
+    suspend fun changed(memoryId: String, projectId: String?, section: MemorySection, statement: String) {
+        ledger.record(
+            projectId = projectId,
+            section = section.name,
+            topicKey = "mem:$memoryId",
+            statement = statement,
+        )
+    }
+
+    /** Closes the active chain entry; a no-op when nothing is active. */
+    suspend fun removed(memoryId: String, reason: String) {
+        val active = ledger.active("mem:$memoryId") ?: return
+        ledger.supersede(active.id, reason = reason)
+    }
+}

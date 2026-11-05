@@ -1,7 +1,6 @@
 package com.androidharness.app.data
 
-import com.androidharness.app.data.db.DecisionDao
-import com.androidharness.app.data.db.DecisionEntity
+import com.androidharness.app.data.db.FakeDecisionDao
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -14,30 +13,6 @@ import org.junit.Test
  * chain replayable through supersedesId.
  */
 class DecisionLedgerTest {
-
-    /** In-memory stand-in for the Room implementation; same interface. */
-    private class FakeDecisionDao : DecisionDao {
-        val rows = LinkedHashMap<String, DecisionEntity>()
-
-        override suspend fun insertDecision(row: DecisionEntity) {
-            require(row.id !in rows) { "duplicate id ${row.id}" }
-            rows[row.id] = row
-        }
-
-        override suspend fun updateDecision(row: DecisionEntity) {
-            require(row.id in rows) { "unknown id ${row.id}" }
-            rows[row.id] = row
-        }
-
-        override suspend fun decision(id: String): DecisionEntity? = rows[id]
-
-        override suspend fun activeDecision(topicKey: String): DecisionEntity? =
-            rows.values.filter { it.topicKey == topicKey && it.status == "ACTIVE" }
-                .maxByOrNull { it.decidedAt }
-
-        override suspend fun history(topicKey: String): List<DecisionEntity> =
-            rows.values.filter { it.topicKey == topicKey }.sortedBy { it.decidedAt }
-    }
 
     private fun ledger() = DecisionLedger(FakeDecisionDao())
 

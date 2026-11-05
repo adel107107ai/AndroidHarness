@@ -91,6 +91,9 @@ internal object MemoryPrompt {
 class MemoryRepository(private val db: AppDatabase, private val settings: SettingsRepository) {
     private val dao get() = db.dao()
 
+    /** DECISION-category memories keep an immutable supersede chain in the decisions table. */
+    private val decisionSync = DecisionSync(DecisionLedger(db.decisionDao()))
+
     val memories: Flow<List<MemoryEntity>> get() = dao.memoriesFlow()
 
     suspend fun sectionForSession(sessionId: String?): MemorySection =
@@ -142,6 +145,7 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
                 if (current.text == clean && current.category == (category?.name ?: current.category)) return@withTransaction WriteResult(current, Action.UNCHANGED)
                 val updated = current.copy(text = clean, category = category?.name ?: current.category, updatedAt = System.currentTimeMillis())
                 dao.upsertMemory(updated)
+                if (updated.category == MemoryCategory.DECISION.name) decisionSync.changed(current.id, current.projectId, section, clean)
                 WriteResult(updated, Action.UPDATED)
             } else {
                 val clean = checkedText(text)
@@ -178,6 +182,7 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
         val memory = MemoryEntity(UUID.randomUUID().toString(), text, category.name, scope.name, actualProject,
             sessionId, createdAt = now, updatedAt = now, section = section.name)
         dao.upsertMemory(memory)
+        if (category == MemoryCategory.DECISION) decisionSync.changed(memory.id, actualProject, section, text)
         trim()
         return WriteResult(memory, Action.SAVED)
     }
@@ -198,6 +203,10 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
             it.scope == scope.name && it.projectId == actualProject && MemoryMatch.key(it.text) == MemoryMatch.key(clean) }) { "This memory already exists." }
         dao.upsertMemory(current.copy(text = clean, category = category.name, scope = if (actualProject != null) "PROJECT" else "GLOBAL",
             projectId = actualProject, section = section.name, updatedAt = System.currentTimeMillis()))
+        when {
+            category == MemoryCategory.DECISION -> decisionSync.changed(current.id, actualProject, section, clean)
+            current.category == MemoryCategory.DECISION.name -> decisionSync.removed(current.id, "category changed")
+        }
     }
 
     suspend fun consolidate(plan: MemoryConsolidation, reviewedText: String): MemoryEntity = db.withTransaction {
@@ -213,6 +222,8 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
             createdAt = now, updatedAt = now, pinned = current.any { it.pinned }, section = plan.section.name, isSummary = true)
         dao.upsertMemory(summary)
         dao.consolidateMemories(current.map { it.id }, summary.id)
+        current.filter { it.category == MemoryCategory.DECISION.name }
+            .forEach { decisionSync.removed(it.id, "consolidated") }
         summary
     }
 
@@ -223,6 +234,8 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
         check(originals.isNotEmpty()) { "The original entries have already been restored." }
         val initialText = MemoryConsolidation.plans(originals.map { it.copy(consolidatedInto = null) }).singleOrNull()?.text
         dao.restoreConsolidatedMemories(summaryId)
+        originals.filter { it.category == MemoryCategory.DECISION.name }
+            .forEach { decisionSync.changed(it.id, it.projectId, MemorySection.fromStored(it.section), it.text) }
         if (summary.text == initialText) dao.deleteMemory(summaryId)
         else dao.upsertMemory(summary.copy(enabled = false)) // Keep later edits available for review.
     }
@@ -230,9 +243,11 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
     suspend fun remove(id: String) = db.withTransaction {
         val current = dao.memory(id)
         check(current?.consolidatedInto == null) { "Restore the original entries before deleting one of them." }
-        if (current?.isSummary == true) {
-            dao.allMemories().filter { it.consolidatedInto == id }.forEach { dao.deleteMemory(it.id) }
-        }
+        val children = if (current?.isSummary == true) dao.allMemories().filter { it.consolidatedInto == id } else emptyList()
+        (children + listOfNotNull(current))
+            .filter { it.category == MemoryCategory.DECISION.name }
+            .forEach { decisionSync.removed(it.id, "memory deleted") }
+        children.forEach { dao.deleteMemory(it.id) }
         dao.deleteMemory(id)
     }
 
