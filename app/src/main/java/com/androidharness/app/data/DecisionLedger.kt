@@ -98,3 +98,25 @@ internal class DecisionSync(private val ledger: DecisionLedger) {
         ledger.supersede(active.id, reason = reason)
     }
 }
+
+/**
+ * Formats ACTIVE decisions for the context prompt — the "review previous
+ * decisions" half of the loop. Pure and capped, like [MemoryPrompt].
+ */
+internal object DecisionPrompt {
+    const val MAX_CHARS = 2_500
+
+    fun build(decisions: List<DecisionEntity>, maxChars: Int = MAX_CHARS): String {
+        val text = StringBuilder()
+        val sorted = decisions.filter { it.status == "ACTIVE" }.sortedByDescending { it.decidedAt }
+        var omitted = 0
+        for (d in sorted) {
+            val rationale = if (d.rationale.isBlank()) "" else " — ${d.rationale}"
+            val line = "- [${d.topicKey}] ${d.statement}$rationale\n"
+            if (text.length + line.length > maxChars) { omitted++; continue }
+            text.append(line)
+        }
+        if (omitted > 0) text.append("- $omitted more standing decisions: recall them by topic.\n")
+        return text.toString().trim()
+    }
+}

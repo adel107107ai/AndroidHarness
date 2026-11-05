@@ -118,6 +118,21 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
         return block.text
     }
 
+    /**
+     * ACTIVE standing decisions for this section/project — the block the model
+     * reviews before taking a contrary action. Null when none stand or memory
+     * is off for the section.
+     */
+    suspend fun decisionPromptBlock(sessionId: String?): String? {
+        if (!isEnabled(sessionId)) return null
+        val section = sectionForSession(sessionId)
+        val project = projectIdForSession(sessionId)
+        val rows = db.decisionDao().activeDecisions()
+            .filter { it.section == section.name || it.section == DecisionSections.SHARED }
+            .filter { it.projectId == null || (project != null && it.projectId == project) }
+        return DecisionPrompt.build(rows).ifBlank { null }
+    }
+
     enum class Action { SAVED, UPDATED, UNCHANGED }
     data class WriteResult(val memory: MemoryEntity, val action: Action)
 

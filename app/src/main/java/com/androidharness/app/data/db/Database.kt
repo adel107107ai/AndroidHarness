@@ -737,6 +737,9 @@ interface DecisionDao {
     @Query("SELECT * FROM decisions WHERE topicKey = :topicKey AND status = 'ACTIVE' ORDER BY decidedAt DESC LIMIT 1")
     suspend fun activeDecision(topicKey: String): DecisionEntity?
 
+    @Query("SELECT * FROM decisions WHERE status = 'ACTIVE' ORDER BY decidedAt DESC")
+    suspend fun activeDecisions(): List<DecisionEntity>
+
     @Query("SELECT * FROM decisions WHERE topicKey = :topicKey ORDER BY decidedAt ASC, createdAt ASC")
     suspend fun history(topicKey: String): List<DecisionEntity>
 

@@ -20,6 +20,9 @@ class FakeDecisionDao : DecisionDao {
         rows.values.filter { it.topicKey == topicKey && it.status == "ACTIVE" }
             .maxByOrNull { it.decidedAt }
 
+    override suspend fun activeDecisions(): List<DecisionEntity> =
+        rows.values.filter { it.status == "ACTIVE" }.sortedByDescending { it.decidedAt }
+
     override suspend fun history(topicKey: String): List<DecisionEntity> =
         rows.values.filter { it.topicKey == topicKey }.sortedBy { it.decidedAt }
 }

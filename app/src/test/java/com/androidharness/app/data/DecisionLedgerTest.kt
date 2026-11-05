@@ -1,9 +1,12 @@
 package com.androidharness.app.data
 
 import com.androidharness.app.data.db.FakeDecisionDao
+import com.androidharness.app.data.db.DecisionEntity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -88,5 +91,30 @@ class DecisionLedgerTest {
             fail("bad section")
         } catch (_: IllegalStateException) {
         }
+    }
+
+    @Test
+    fun `decision prompt lists only active decisions newest first and caps`() = runBlocking {
+        val l = ledger()
+        l.record(topicKey = "build", statement = "old decision", rationale = "first")
+        l.record(topicKey = "build", statement = "new decision", rationale = "replaces first")
+        val prompt = DecisionPrompt.build(l.history("build"))
+        assertTrue(prompt.contains("[build] new decision — replaces first"))
+        assertFalse("superseded rows stay out of the prompt", prompt.contains("old decision"))
+
+        val many = (1..50).map {
+            DecisionEntity(id = "$it", topicKey = "t$it", statement = "s$it", createdAt = it.toLong(), decidedAt = it.toLong())
+        }
+        val capped = DecisionPrompt.build(many, maxChars = 400)
+        assertTrue("capped block stays bounded, got ${capped.length}", capped.length <= 480)
+        assertTrue(capped.contains("more standing decisions"))
+        assertTrue(capped.endsWith("recall them by topic."))
+    }
+
+    @Test
+    fun `decision prompt is empty when nothing stands`() {
+        assertEquals("", DecisionPrompt.build(emptyList()))
+        val closed = DecisionEntity(id = "x", topicKey = "t", statement = "s", status = "SUPERSEDED", createdAt = 1, decidedAt = 1)
+        assertEquals("", DecisionPrompt.build(listOf(closed)))
     }
 }
