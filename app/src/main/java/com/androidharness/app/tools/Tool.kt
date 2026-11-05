@@ -141,6 +141,9 @@ class ToolRegistry(private val tools: List<Tool>) {
                 CodeGraphAffectedTool(codeGraph),
                 CodeGraphSyncTool(codeGraph),
             )
+            // verify_run rides on the registry's own shell tool; the lambda
+            // resolves it at execution time, after this list is complete.
+            baseTools.add(com.androidharness.app.agent.verify.VerifyTool { baseTools.firstOrNull { it.name == "shell" } })
             if (artifactLoader != null) {
                 baseTools.add(CreateArtifactTool(artifactLoader))
                 baseTools.add(ReadArtifactTool(artifactLoader))

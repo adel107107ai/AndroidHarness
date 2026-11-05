@@ -1101,8 +1101,10 @@ class AgentEngine(
             }
         }
         if (!approved) {
-            return ToolResult(false, "The user denied permission to run ${call.name}.")
+            val nudge = ApprovalDenialBreaker.recordDenial(sessionId)
+            return ToolResult(false, "The user denied permission to run ${call.name}.$nudge")
         }
+        ApprovalDenialBreaker.reset(sessionId)
 
         val args = try {
             json.parseToJsonElement(call.argumentsJson).jsonObject
