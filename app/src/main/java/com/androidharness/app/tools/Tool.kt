@@ -89,6 +89,7 @@ class ToolRegistry(private val tools: List<Tool>) {
             fileHistory: com.androidharness.app.data.WorkspaceFileHistory? = null,
             memory: com.androidharness.app.data.MemoryRepository? = null,
             searchApiRefresh: suspend () -> SearchApiConfig? = { searchApi() },
+            mcpServer: com.androidharness.app.tools.mcp.HarnessMcpServer? = null,
         ): ToolRegistry {
             val baseTools = mutableListOf<Tool>(
                 ListDirTool(),
@@ -144,6 +145,7 @@ class ToolRegistry(private val tools: List<Tool>) {
             // verify_run rides on the registry's own shell tool; the lambda
             // resolves it at execution time, after this list is complete.
             baseTools.add(com.androidharness.app.agent.verify.VerifyTool { baseTools.firstOrNull { it.name == "shell" } })
+            if (mcpServer != null) baseTools.add(com.androidharness.app.tools.mcp.McpServerManageTool(mcpServer))
             if (artifactLoader != null) {
                 baseTools.add(CreateArtifactTool(artifactLoader))
                 baseTools.add(ReadArtifactTool(artifactLoader))

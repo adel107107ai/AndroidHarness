@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -187,6 +188,16 @@ class AppContainer(val appContext: Context) {
         },
     )
     val browser = com.androidharness.app.browser.BrowserController(appContext, images)
+    // The localhost MCP server is lazy on both the registry and the workspace:
+    // it is declared before them but only resolves them when started or called.
+    // Explicit type: the server's registry lambda references `registry` below,
+    // whose initializer passes this server back — the annotation breaks the cycle.
+    val mcpServer: com.androidharness.app.tools.mcp.HarnessMcpServer =
+        com.androidharness.app.tools.mcp.HarnessMcpServer(
+            registry = { registry },
+            workspace = { workspace.currentOnce() },
+            tokenFile = File(appContext.filesDir, "mcp-token"),
+        )
     val registry = ToolRegistry.default(
         fetchClient, todoStore, backgroundProcesses, linuxEnv, shizuku, shellRouter, skills, codeGraph,
         imageStore = images,
@@ -197,6 +208,7 @@ class AppContainer(val appContext: Context) {
         toolOutputLoader = sessions::toolOutput,
         fileHistory = fileHistory,
         memory = memory,
+        mcpServer = mcpServer,
     )
     val mcp = com.androidharness.app.tools.mcp.McpManager(appContext, linuxEnv, keys, codeGraph)
     val github = com.androidharness.app.github.GitHubAuth(BuildConfig.GITHUB_CLIENT_ID,
