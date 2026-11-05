@@ -83,12 +83,19 @@ class DecisionLedger(private val dao: DecisionDao) {
  */
 internal class DecisionSync(private val ledger: DecisionLedger) {
 
-    suspend fun changed(memoryId: String, projectId: String?, section: MemorySection, statement: String) {
+    suspend fun changed(
+        memoryId: String,
+        projectId: String?,
+        section: MemorySection,
+        statement: String,
+        rationale: String = "",
+    ) {
         ledger.record(
             projectId = projectId,
             section = section.name,
             topicKey = "mem:$memoryId",
             statement = statement,
+            rationale = rationale,
         )
     }
 

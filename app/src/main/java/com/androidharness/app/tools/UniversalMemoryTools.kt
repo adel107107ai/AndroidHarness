@@ -33,6 +33,9 @@ class RememberTool(private val memory: MemoryRepository) : Tool {
             "category" to Schema.string(
                 "One of profile, preference, project, decision, or fact (default fact).",
             ),
+            "rationale" to Schema.string(
+                "Required when category is decision: why this decision was taken. Kept with the decision's history so later reviews can follow the reasoning.",
+            ),
         ),
         required = listOf("text"),
     )
@@ -43,6 +46,10 @@ class RememberTool(private val memory: MemoryRepository) : Tool {
         val text = args["text"]?.jsonPrimitive?.content
             ?: throw ToolFailure("Missing required argument: text")
         val category = args["category"]?.jsonPrimitive?.content?.let { MemoryCategory.fromStored(it) }
+        val rationale = args["rationale"]?.jsonPrimitive?.content?.trim().orEmpty()
+        if (category == MemoryCategory.DECISION && rationale.isEmpty()) {
+            throw ToolFailure("A decision needs a rationale: record why it was taken (rationale), so later reviews can follow the reasoning.")
+        }
         val requested = when (args["scope"]?.jsonPrimitive?.content?.trim()?.lowercase()) {
             "global" -> MemoryScope.GLOBAL
             "project" -> MemoryScope.PROJECT
@@ -55,7 +62,8 @@ class RememberTool(private val memory: MemoryRepository) : Tool {
             memory.rememberResult(text, category, requested, ctx.sessionId,
                 memoryId = args["memory_id"]?.jsonPrimitive?.content,
                 previousText = args["previous_text"]?.jsonPrimitive?.content,
-                allowSimilar = args["allow_similar"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() == true)
+                allowSimilar = args["allow_similar"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() == true,
+                rationale = rationale)
         } catch (e: IllegalArgumentException) { throw ToolFailure(e.message ?: "Could not save memory.") }
           catch (e: IllegalStateException) { throw ToolFailure(e.message ?: "Could not save memory.") }
         val action = result.action.name.lowercase()

@@ -52,6 +52,15 @@ class DecisionSyncTest {
     }
 
     @Test
+    fun `the rationale travels with the decision into the ledger`() = runBlocking {
+        val ledger = DecisionLedger(FakeDecisionDao())
+        val sync = DecisionSync(ledger)
+        sync.changed("m1", null, MemorySection.SHARED, "use release key", rationale = "key generated and backed up")
+        assertEquals("use release key", ledger.active("mem:m1")?.statement)
+        assertEquals("key generated and backed up", ledger.active("mem:m1")?.rationale)
+    }
+
+    @Test
     fun `removing without any entry is a no-op`() = runBlocking {
         val ledger = DecisionLedger(FakeDecisionDao())
         val sync = DecisionSync(ledger)

@@ -142,6 +142,7 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
     suspend fun rememberResult(
         text: String, category: MemoryCategory?, requestedScope: MemoryScope, sessionId: String?,
         memoryId: String? = null, previousText: String? = null, allowSimilar: Boolean = false,
+        rationale: String = "",
     ): WriteResult {
         check(isEnabled(sessionId)) { "Memory is off for this section." }
         val section = sectionForSession(sessionId)
@@ -160,7 +161,7 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
                 if (current.text == clean && current.category == (category?.name ?: current.category)) return@withTransaction WriteResult(current, Action.UNCHANGED)
                 val updated = current.copy(text = clean, category = category?.name ?: current.category, updatedAt = System.currentTimeMillis())
                 dao.upsertMemory(updated)
-                if (updated.category == MemoryCategory.DECISION.name) decisionSync.changed(current.id, current.projectId, section, clean)
+                if (updated.category == MemoryCategory.DECISION.name) decisionSync.changed(current.id, current.projectId, section, clean, rationale)
                 WriteResult(updated, Action.UPDATED)
             } else {
                 val clean = checkedText(text)
@@ -176,7 +177,7 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
                     val near = candidates.firstOrNull { MemoryMatch.key(it.text) != MemoryMatch.key(clean) && MemoryMatch.similar(it.text, clean) }
                     check(near == null) { "Similar memory [id:${near?.id}]: ${near?.text}. Recall it and update by memory_id, or set allow_similar only if these are distinct facts." }
                 }
-                save(clean, category ?: MemoryCategory.FACT, scope, projectId, sessionId, section)
+                save(clean, category ?: MemoryCategory.FACT, scope, projectId, sessionId, section, rationale)
             }
         }
     }
@@ -184,7 +185,7 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
     suspend fun add(text: String, category: MemoryCategory, requestedScope: MemoryScope, projectId: String?, section: MemorySection = MemorySection.SHARED): MemoryEntity? =
         if (text.isBlank()) null else db.withTransaction { save(checkedText(text), category, requestedScope, projectId, null, section).memory }
 
-    private suspend fun save(text: String, category: MemoryCategory, requestedScope: MemoryScope, projectId: String?, sessionId: String?, section: MemorySection): WriteResult {
+    private suspend fun save(text: String, category: MemoryCategory, requestedScope: MemoryScope, projectId: String?, sessionId: String?, section: MemorySection, rationale: String = ""): WriteResult {
         val scope = if (requestedScope == MemoryScope.PROJECT && projectId != null) MemoryScope.PROJECT else MemoryScope.GLOBAL
         val actualProject = projectId.takeIf { scope == MemoryScope.PROJECT }
         val existing = dao.allMemories().firstOrNull { it.consolidatedInto == null && !it.isSummary && it.scope == scope.name &&
@@ -197,7 +198,7 @@ class MemoryRepository(private val db: AppDatabase, private val settings: Settin
         val memory = MemoryEntity(UUID.randomUUID().toString(), text, category.name, scope.name, actualProject,
             sessionId, createdAt = now, updatedAt = now, section = section.name)
         dao.upsertMemory(memory)
-        if (category == MemoryCategory.DECISION) decisionSync.changed(memory.id, actualProject, section, text)
+        if (category == MemoryCategory.DECISION) decisionSync.changed(memory.id, actualProject, section, text, rationale)
         trim()
         return WriteResult(memory, Action.SAVED)
     }
