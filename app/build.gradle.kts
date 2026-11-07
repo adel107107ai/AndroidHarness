@@ -8,6 +8,26 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// Gradle runs unit tests in a forked worker JVM that does not inherit the
+// client's java.io.tmpdir. On a device whose bundled JDK was built with a
+// Termux tmpdir that does not exist here, every test touching a temp file
+// fails with NoSuchFileException. Applied only when the property is passed,
+// so CI and ordinary desktop builds keep their default behaviour.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    providers.gradleProperty("harness.testTmpDir").orNull?.let {
+        systemProperty("java.io.tmpdir", it)
+    }
+    providers.gradleProperty("harness.testUserHome").orNull?.let {
+        systemProperty("user.home", it)
+    }
+}
+
+// Room schema export: each version's schema lands in app/schemas so migration
+// diffs are reviewable in git and future migration tests can load past versions.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 // The native build needs the exact NDK version pinned below, and AGP fails
 // Gradle configuration outright when it is missing. Tooling runners without an
 // NDK (GitHub's default-setup CodeQL scan, which has no editable workflow to
@@ -53,8 +73,8 @@ android {
         applicationId = "com.androidharness.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 33
-        versionName = "2.9"
+        versionCode = 34
+        versionName = "2.10"
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")
         if (hasNdk) {
             ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }

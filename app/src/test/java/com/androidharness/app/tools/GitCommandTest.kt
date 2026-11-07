@@ -18,7 +18,7 @@ class GitCommandTest {
         val (code, message) = shell(gitDiffCmd(null, false))
         assertTrue(code != 0)
         assertTrue(message, message.contains("not a git repository"))
-        success(gitCmd("init", "config user.name Test", "config user.email test@example.com"))
+        initRepo()
         val file = tmp.root.resolve("space name.txt").apply { writeText("before\n") }
         success(gitCmd("add .", "commit -m initial"))
         file.writeText("after\n")
@@ -43,6 +43,17 @@ class GitCommandTest {
 
     private fun success(command: String): String = successIn(tmp.root, command)
 
+    /**
+     * init.defaultBranch is host state: this device answers "main", a desktop
+     * may answer "master". The branch.master.* assertions below must test the
+     * git tool, not the host config. gitCmd lives in GitTools (product code)
+     * and must not be bent for a test, so the branch is pinned on a raw init.
+     */
+    private fun initRepo() {
+        success("git -c init.defaultBranch=master init")
+        success(gitCmd("config user.name Test", "config user.email test@example.com"))
+    }
+
     private fun successIn(dir: java.io.File, command: String): String {
         val (code, output) = shellIn(dir, command)
         assertEquals(output, 0, code)
@@ -51,7 +62,7 @@ class GitCommandTest {
 
     @Test
     fun `commit runs in bash and removes tracked runtime artifacts`() {
-        success(gitCmd("init", "config user.name Test", "config user.email test@example.com"))
+        initRepo()
         tmp.root.resolve(".harness").mkdirs()
         val artifact = tmp.root.resolve(".harness/screenshot.png").apply { writeText("private") }
         tmp.root.resolve("file.txt").writeText("first")
@@ -65,7 +76,7 @@ class GitCommandTest {
 
     @Test
     fun `first commit works with no tracked runtime directory`() {
-        success(gitCmd("init", "config user.name Test", "config user.email test@example.com"))
+        initRepo()
         tmp.root.resolve("file.txt").writeText("first")
         tmp.root.resolve(".harness").mkdirs()
         tmp.root.resolve(".harness/private.txt").writeText("private")
@@ -82,7 +93,7 @@ class GitCommandTest {
      */
     @Test
     fun `runtime artifacts stay out when the workspace is a subdirectory of the repo`() {
-        success(gitCmd("init", "config user.name Test", "config user.email test@example.com"))
+        initRepo()
         val workspace = tmp.root.resolve("ws").apply { mkdirs() }
         workspace.resolve("file.txt").writeText("first")
         val artifacts = listOf(
@@ -111,7 +122,7 @@ class GitCommandTest {
      */
     @Test
     fun `a previously tracked artifact is dropped from the index`() {
-        success(gitCmd("init", "config user.name Test", "config user.email test@example.com"))
+        initRepo()
         val workspace = tmp.root.resolve("ws").apply { mkdirs() }
         workspace.resolve("keep.txt").writeText("keep")
         val artifact = workspace.resolve(".harness/screenshots/old.jpg").apply {
@@ -131,7 +142,7 @@ class GitCommandTest {
 
     @Test
     fun `log explains a directory with no history and rejects an outside path`() {
-        success(gitCmd("init", "config user.name Test", "config user.email test@example.com"))
+        initRepo()
         tmp.root.resolve("file.txt").writeText("first")
         success(gitCommitCmd("initial"))
         tmp.root.resolve("untracked").mkdirs()
@@ -316,7 +327,7 @@ class GitCommandTest {
             gitHeadBranchCmd(),
         )
         // A plain push on a branch with no upstream leaves no tracking config.
-        success(gitCmd("init", "config user.name Test", "config user.email test@example.com"))
+        initRepo()
         tmp.root.resolve("f.txt").writeText("first")
         success(gitCmd("add -A", "commit -m initial"))
         // Inside the per-test folder so repeated runs never see a stale
@@ -340,7 +351,7 @@ class GitCommandTest {
      */
     @Test
     fun `push -u repairs a branch tracking the wrong merge ref`() {
-        success(gitCmd("init", "config user.name Test", "config user.email test@example.com"))
+        initRepo()
         tmp.root.resolve("f.txt").writeText("first")
         success(gitCmd("add -A", "commit -m initial"))
         val remote = tmp.root.resolve("wrong-merge-remote.git").absolutePath

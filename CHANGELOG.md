@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.10 (2026-11-05)
+
+### Added
+
+- **Decision ledger**: decisions are now an immutable chain in a dedicated table (database v24). Saving or editing a decision-category memory records each step with its rationale; a new decision supersedes the previous one instead of overwriting it, so past decisions and their reasons stay reviewable, and the active decisions for the current context are injected into every prompt with an explicit review rule.
+- **Rationale required for decisions**: remember with category decision now asks for a rationale — a decision without a why is not reviewable.
+- **verify_run tool**: runs the project's verification recipe (`.harness/verify.json`; detected from the gradle/node/python project shape when missing) phase by phase through the shell, and each phase lands in verification evidence.
+- **Localhost MCP server**: exposes the app's read-only tools over MCP on 127.0.0.1 behind a bearer token and a safe list (manage with the `mcp_server` tool). A desktop agent reaches the phone via `adb forward`; nothing is ever exposed on the LAN.
+- **Skill usage ledger**: skill views are tracked per workspace (`.harness/skill-usage.json`, bounded to the newest 100); stale skills — never or long unused — surface for review.
+- **Approval denial breaker**: after three consecutive permission denials in a session, the denial result itself tells the model to change approach instead of requesting the same permission again.
+
+### Fixed
+
+- **Full access no longer skips the hardline shell blocks**: the six never-allowed shapes (recursive delete of the filesystem root, formatting a block device, writing directly to a block device, fork bombs, piping a download into a shell, chmod 777 of the filesystem root) now apply in every permission mode, including full access.
+- **FTP share temp files**: a cancelled upload could strand its `.harness-transfer-*` staging file in the shared folder. The accept/registration race is closed and server shutdown now waits for in-flight sessions to unwind before returning.
+
+### Build tooling
+
+- The forked unit-test worker now honors `harness.testTmpDir` / `harness.testUserHome` Gradle properties, for environments whose default temp path does not exist. CI behaviour is unchanged when the properties are absent.
+
 ## 2.9 (2026-10-26)
 
 ### Added

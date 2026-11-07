@@ -13,8 +13,16 @@ class StorageFilesTest {
     private fun old(file: File): File { file.setLastModified(1_000); return file }
     private suspend fun plan(root: File, file: File) = requireNotNull(StorageFiles.candidate("test", "Test", "", "Downloads", root, file, 10_000))
 
+    /** f2fs (Android app data) refuses hardlinks; ext4 on CI allows them. */
+    private fun hardlinksSupported(dir: File): Boolean = try {
+        val a = File(dir, "probe-a").apply { writeText("x") }
+        Files.createLink(File(dir, "probe-b").toPath(), a.toPath())
+        File(dir, "probe-b").delete(); a.delete(); true
+    } catch (_: Exception) { false }
+
     @Test fun `counts aliases hardlinks and nested roots only once without following links`() = runBlocking {
         val root = temp.newFolder("tree")
+        org.junit.Assume.assumeTrue("hardlinks unsupported on this filesystem", hardlinksSupported(root))
         val source = File(root, "source").apply { writeText("hello") }
         Files.createLink(File(root, "alias").toPath(), source.toPath())
         Files.createSymbolicLink(File(root, "outside").toPath(), temp.root.toPath())

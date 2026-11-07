@@ -10,29 +10,29 @@ import java.io.File
  */
 object ShellPolicy {
 
-    fun denyReason(command: String, workspaceRoot: File? = null, cwd: File? = null): String? {
+    /**
+     * The six never-allowed shell shapes. Hardline: they apply in every
+     * permission mode, including full access, and no saved grant can bypass
+     * them. [denyReason] runs this first; AgentEngine also calls it directly
+     * for the full-access path, where the sandbox skip must not extend to
+     * these.
+     */
+    fun hardlineDenyReason(command: String): String? {
         val cmd = command.trim()
         if (cmd.isEmpty()) return null
+        if (isRmRoot(cmd)) return "Blocked: recursive delete of the filesystem root is never allowed."
+        if (PIPE_TO_SHELL.containsMatchIn(cmd)) return "Blocked: piping a download straight into a shell is never allowed."
+        if (MKFS.containsMatchIn(cmd)) return "Blocked: formatting a block device is never allowed."
+        if (DD_DEV.containsMatchIn(cmd)) return "Blocked: writing directly to a block device is never allowed."
+        if (FORK_BOMB.containsMatchIn(cmd)) return "Blocked: fork bomb is never allowed."
+        if (CHMOD_ROOT.containsMatchIn(cmd)) return "Blocked: chmod 777 of the filesystem root is never allowed."
+        return null
+    }
 
-        // 1. Dangerous system-level commands
-        if (isRmRoot(cmd)) {
-            return "Blocked: recursive delete of the filesystem root is never allowed."
-        }
-        if (PIPE_TO_SHELL.containsMatchIn(cmd)) {
-            return "Blocked: piping a download straight into a shell is never allowed."
-        }
-        if (MKFS.containsMatchIn(cmd)) {
-            return "Blocked: formatting a block device is never allowed."
-        }
-        if (DD_DEV.containsMatchIn(cmd)) {
-            return "Blocked: writing directly to a block device is never allowed."
-        }
-        if (FORK_BOMB.containsMatchIn(cmd)) {
-            return "Blocked: fork bomb is never allowed."
-        }
-        if (CHMOD_ROOT.containsMatchIn(cmd)) {
-            return "Blocked: chmod 777 of the filesystem root is never allowed."
-        }
+    fun denyReason(command: String, workspaceRoot: File? = null, cwd: File? = null): String? {
+        hardlineDenyReason(command)?.let { return it }
+        val cmd = command.trim()
+        if (cmd.isEmpty()) return null
 
         val effectiveCwd = cwd ?: workspaceRoot
 
@@ -390,7 +390,19 @@ object ShellPolicy {
     private fun isRedirectionOp(op: String): Boolean =
         op == ">" || op == ">>" || op == "<" || op == "1>" || op == "2>" || op == "1>>" || op == "2>>" || op == "&>" || op == "&>>" || op == "tee"
 
+    // On Android /etc is a symlink to /system/etc, so a lexical "/etc/..."
+    // token resolves into the allowlisted /system and an intended denial turns
+    // into an allowance. Checked after resolution and before the allowlist so
+    // both the alias and its target stay blocked. On a desktop filesystem
+    // /etc is a real directory and /system/etc does not exist, so this changes
+    // nothing there.
+    private val DENIED_SYSTEM_CONFIG = listOf("/etc", "/system/etc")
+
+    private fun isDeniedSystemConfig(path: String): Boolean =
+        DENIED_SYSTEM_CONFIG.any { path == it || path.startsWith("$it/") }
+
     private fun isAllowedSystemPath(path: String): Boolean {
+        if (isDeniedSystemConfig(path)) return false
         val allowedPrefixes = listOf(
             "/system",
             "/vendor",

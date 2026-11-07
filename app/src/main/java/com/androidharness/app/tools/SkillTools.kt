@@ -1,5 +1,6 @@
 package com.androidharness.app.tools
 
+import com.androidharness.app.skills.SkillLedger
 import com.androidharness.app.skills.SkillSource
 import com.androidharness.app.skills.SkillStore
 import kotlinx.serialization.json.JsonObject
@@ -29,6 +30,11 @@ class SkillViewTool(
         val filePath = args["file_path"]?.jsonPrimitive?.content
         val viewed = store.forWorkspace(ctx.workspace).view(name, filePath).getOrElse { err ->
             return ToolResult(false, err.message ?: "Skill '$name' not found.")
+        }
+        // Usage ledger (Hermes' skill_usage): track what the agent actually
+        // loads so stale skills surface later. A failure here never breaks the view.
+        if (filePath.isNullOrBlank()) {
+            runCatching { SkillLedger(ctx.workspace).recordUse(viewed.name) }
         }
         val origin = when (viewed.source) {
             SkillSource.BUNDLED -> "bundled"

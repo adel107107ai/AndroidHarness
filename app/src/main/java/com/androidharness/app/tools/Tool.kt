@@ -19,6 +19,8 @@ data class ToolContext(
     val sessionId: String? = null,
     /** Scoped to this call by the engine; never shared across chats or concurrent installs. */
     val onPackageProgress: suspend (com.androidharness.app.data.env.PackageInstallStatus) -> Unit = {},
+    /** Provenance of this turn's trigger; the default is the user's own request. */
+    val trust: TrustLevel = TrustLevel.LOCAL_USER,
 )
 
 data class ToolResult(
@@ -87,6 +89,7 @@ class ToolRegistry(private val tools: List<Tool>) {
             fileHistory: com.androidharness.app.data.WorkspaceFileHistory? = null,
             memory: com.androidharness.app.data.MemoryRepository? = null,
             searchApiRefresh: suspend () -> SearchApiConfig? = { searchApi() },
+            mcpServer: com.androidharness.app.tools.mcp.HarnessMcpServer? = null,
         ): ToolRegistry {
             val baseTools = mutableListOf<Tool>(
                 ListDirTool(),
@@ -139,6 +142,10 @@ class ToolRegistry(private val tools: List<Tool>) {
                 CodeGraphAffectedTool(codeGraph),
                 CodeGraphSyncTool(codeGraph),
             )
+            // verify_run rides on the registry's own shell tool; the lambda
+            // resolves it at execution time, after this list is complete.
+            baseTools.add(com.androidharness.app.agent.verify.VerifyTool { baseTools.firstOrNull { it.name == "shell" } })
+            if (mcpServer != null) baseTools.add(com.androidharness.app.tools.mcp.McpServerManageTool(mcpServer))
             if (artifactLoader != null) {
                 baseTools.add(CreateArtifactTool(artifactLoader))
                 baseTools.add(ReadArtifactTool(artifactLoader))
